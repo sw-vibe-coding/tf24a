@@ -1,0 +1,6 @@
+: TWO 2 ;
+: SQUARE DUP * ;
+: CUBE DUP SQUARE * ;
+TWO .
+5 SQUARE .
+3 CUBE .

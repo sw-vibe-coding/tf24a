@@ -1,0 +1,4 @@
+1 2 3 .S
+2 3 + .
+HEX FF . DECIMAL
+WORDS

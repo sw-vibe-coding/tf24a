@@ -300,9 +300,28 @@ do_plus:
     add r2, 3
     jmp (r0)
 
+; * ( n1 n2 -- n1*n2 )
+entry_star:
+    .word entry_plus
+    .byte 1
+    .byte 42
+do_star:
+    add r1, -3
+    sw r2, 0(r1)        ; save IP
+    pop r2               ; r2 = n2
+    pop r0               ; r0 = n1
+    mul r0, r2           ; r0 = n1 * n2
+    push r0
+    lw r2, 0(r1)        ; restore IP
+    add r1, 3
+    ; NEXT
+    lw r0, 0(r2)
+    add r2, 3
+    jmp (r0)
+
 ; - ( n1 n2 -- n1-n2 )
 entry_minus:
-    .word entry_plus
+    .word entry_star
     .byte 1
     .byte 45
 do_minus:
@@ -1855,14 +1874,57 @@ i_find_thread:
 ; After FIND: DS has (c-addr 0) or (cfa flag)
 do_i_after_find:
     ; RS: [caller_IP]
-    pop r0               ; flag (0=not found)
+    pop r0               ; flag (0=not found, 1=IMMEDIATE, -1=normal)
     ceq r0, z
     brt i_not_found
-    ; Found: DS has [cfa]. Execute it.
-    ; Set IP to continuation thread so after EXECUTE, we loop
+
+    ; Found: DS has [cfa], r0 = flag
+    ; Check STATE
+    add r1, -3
+    sw r0, 0(r1)        ; save flag. RS: [flag, caller_IP]
+    la r0, var_state_val
+    lw r0, 0(r0)        ; r0 = STATE
+    ceq r0, z
+    brt i_found_exec_interp ; STATE=0 → interpreting → always execute
+
+    ; Compiling (STATE != 0): check IMMEDIATE flag
+    lw r0, 0(r1)        ; flag
+    add r1, 3           ; pop flag. RS: [caller_IP]
+    lcu r2, 1
+    ceq r0, r2           ; C = (flag == 1 = IMMEDIATE)
+    brt i_found_exec     ; IMMEDIATE → execute even in compile mode
+
+    ; Normal word + compile mode → COMMA the CFA
+    ; DS: [cfa]
+    la r2, i_comma_continue
+    lw r0, 0(r2)
+    add r2, 3
+    jmp (r0)
+
+i_comma_continue:
+    .word do_comma       ; compile the CFA
+    .word do_word        ; get next token
+    .word do_i_after_word
+
+i_found_exec:
+    ; Execute the word. DS: [cfa]
+    ; Clean RS if flag is still there (STATE=0 path)
+    ; STATE=0 path: RS = [flag, caller_IP], need to pop flag
+    ; IMMEDIATE path: RS = [caller_IP], flag already popped
+    ; To unify: check RS. Actually, let me use separate labels.
+    ; The STATE=0 branch jumps here with RS: [flag, caller_IP]
+    ; The IMMEDIATE branch jumps here with RS: [caller_IP]
+    ; I need to know which path. Use a flag or separate labels.
+    bra i_do_exec        ; IMMEDIATE path (flag already popped)
+
+i_found_exec_interp:
+    ; STATE=0 path: RS: [flag, caller_IP]
+    add r1, 3           ; pop flag. RS: [caller_IP]
+
+i_do_exec:
     la r2, i_continue
     pop r0               ; cfa
-    jmp (r0)             ; execute it — NEXT will use IP=i_continue
+    jmp (r0)             ; execute — NEXT will use IP=i_continue
 
 i_continue:
     .word do_word
@@ -1921,7 +1983,43 @@ i_num_ok:
     pop r2               ; n
     pop r0               ; discard c-addr
     push r2              ; DS: [n]
-    ; Continue loop
+
+    ; Check STATE
+    la r0, var_state_val
+    lw r0, 0(r0)
+    ceq r0, z
+    brt i_num_interp     ; STATE=0 → leave on stack, continue
+
+    ; Compiling: compile LIT, n
+    ; DS: [n]. Need to compile do_lit then n.
+    ; First push do_lit address, comma it, then push n, comma it.
+    pop r0               ; n
+    add r1, -3
+    sw r0, 0(r1)        ; save n on RS. RS: [n, caller_IP]
+    la r0, do_lit
+    push r0              ; DS: [do_lit_addr]
+    la r2, i_compile_lit_thread
+    lw r0, 0(r2)
+    add r2, 3
+    jmp (r0)
+
+i_compile_lit_thread:
+    .word do_comma       ; compile do_lit address
+    .word do_i_compile_n
+
+do_i_compile_n:
+    ; RS: [n, caller_IP]
+    lw r0, 0(r1)        ; n
+    add r1, 3           ; pop n. RS: [caller_IP]
+    push r0              ; DS: [n] for comma
+    ; Comma n, then continue loop
+    la r2, i_comma_continue
+    lw r0, 0(r2)
+    add r2, 3
+    jmp (r0)
+
+i_num_interp:
+    ; Interpreting: n already on stack, continue loop
     la r2, i_continue
     lw r0, 0(r2)
     add r2, 3

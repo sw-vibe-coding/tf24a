@@ -1,0 +1,5 @@
+: ON  1 LED! ;
+: OFF 0 LED! ;
+: BLINK ON OFF ON OFF ;
+ON
+OFF

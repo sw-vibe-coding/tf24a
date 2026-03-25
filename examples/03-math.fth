@@ -1,0 +1,7 @@
+: NEGATE 0 SWAP - ;
+: DOUBLE DUP + ;
+: TRIPLE DUP DOUBLE + ;
+5 NEGATE .
+3 DOUBLE .
+4 TRIPLE .
+7 3 * .
