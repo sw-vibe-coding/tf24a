@@ -1,0 +1,1 @@
+Saga initialized with plan, CLAUDE.md configured with COR24 ISA details and DTC design decisions

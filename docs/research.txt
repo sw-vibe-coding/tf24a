@@ -1,0 +1,1088 @@
+
+
+
+
+I once used Forth a long time ago and after that I read a book called "Threaded Interpetive Languages" and I've wanted to learn more by teaching.  I want to build a faithful implementation of Forth for a target ISA (COR24-TB, MakerLisp.com).  I have an emulator for the board, an assembler for this ISA, and a C compiler that emits assembler source.  How should I bootsrap Forth which is mostly implemented in itself.  What are the historical approaches?  What is the license for public implementations of Forth.  Should I port using a permissive license, if available, or just do a clean-room bootstrapped implementation?  Should I start with C (because it gives me malloc/free, printf, stdio.h, strings.h etc. -- I do not have a C runtime.  The entire C support is in .h and .c files.  No linker, no loader.  My target hardware (and emulator) have SRAM for code, locals, heap and EBR memory for the stack, and memory-mapped I/O.  I can generate assembler inline in C (for interrupt handlers to deal with specific interrupt registers).  The target ISA has 3 general purpose registers, a PC, frame pointer and stack pointer.  Is there good public documentation on how to implement Forth.  Which words are minimal for a dictionary.  How are more features added? what is the terminology for the base set of Forth words and add on feature sets?
+
+
+Thought for 15s
+You want a bootstrapping plan for a faithful Forth on COR24-TB, with attention to:
+
+historical ways Forth systems were brought up on new machines,
+
+whether to start in assembler vs C,
+
+how much of Forth must exist before Forth can extend itself,
+
+what the minimal dictionary / kernel words are,
+
+how standardized word sets are named,
+
+and what the license tradeoffs are if you port or borrow from existing systems.
+
+High-level recommendation
+For your hardware and toolchain, I would not start by porting a large hosted ANS Forth. I would build a small native kernel in assembler, possibly with a tiny amount of C only for optional host-side experiments, then let that kernel grow itself in Forth.
+
+That is the classic path, and it fits your constraints:
+
+no linker / loader,
+
+no real libc/runtime,
+
+tight control over stacks, code layout, and interrupt paths,
+
+memory-mapped I/O,
+
+only a few registers,
+
+desire for faithfulness and educational value.
+
+Historically, Forths are often brought up with a tiny nucleus in machine code, then the compiler, interpreter, control structures, defining words, and tools are layered on top in Forth itself. That is exactly the bootstrapping style described in the threaded-language tradition and reflected in small educational systems like JonesForth. Threaded-code systems represent definitions largely as lists of addresses of other words, which is why they bootstrap so naturally. 
+
+Architecture first: what you are really building
+A practical Forth for COR24 needs these layers:
+
+1. Inner interpreter / execution engine
+This is the heart of classic threaded Forth:
+
+fetch the next code field / execution token,
+
+dispatch to the word’s implementation,
+
+handle NEXT efficiently.
+
+This is where your ISA matters most.
+
+2. Data stack and return stack
+Forth normally uses two stacks:
+
+data stack for operands,
+
+return stack for control flow and temporary storage.
+
+Given your memory layout, I would strongly consider:
+
+EBR memory for return stack, if it is fast and deterministic,
+
+SRAM for dictionary/code and data stack,
+
+leave C-style call frames out of the core kernel if possible.
+
+3. Dictionary
+Each word needs metadata plus executable behavior:
+
+link to previous word,
+
+name,
+
+flags/immediacy/visibility,
+
+code field,
+
+parameter field.
+
+4. Text interpreter
+Read a token, search dictionary, either:
+
+execute it immediately in interpret state, or
+
+compile it in compile state,
+
+otherwise parse a number.
+
+5. Compiler
+Initially very small:
+
+append execution tokens / addresses to current definition,
+
+support : and ;,
+
+later add control structures and defining words.
+
+6. Outer environment
+terminal I/O,
+
+block or line input,
+
+error handling,
+
+optional persistence / image save.
+
+Historical bootstrap approaches
+There are several historically common approaches.
+
+Approach A: Assembler kernel, then self-extension
+This is the classic and the one I recommend.
+
+You write in assembler:
+
+the stacks,
+
+dictionary layout,
+
+inner interpreter,
+
+a small set of primitives,
+
+: and ; support,
+
+tokenizer and number parser,
+
+enough I/O to talk to a console.
+
+Then you load additional Forth source that defines higher-level words in Forth.
+
+Why this is good for COR24
+
+faithful to how many Forths were actually built,
+
+minimal assumptions,
+
+direct control over registers and memory,
+
+no dependency on a C runtime model that fights Forth.
+
+Downside
+
+more initial assembler work,
+
+debugging the first 1000 lines can be painful.
+
+Approach B: Portable C kernel, then Forth on top
+This is the pForth style: a portable ANS Forth kernel written in C, intended to be ported broadly. pForth explicitly describes itself as a portable ANS Forth based on an ANSI C kernel. 
+
+Why people do this
+
+easier portability,
+
+easier development on hosted systems,
+
+easier testing before bare-metal adaptation.
+
+Why I would not make this your primary path
+
+your C is freestanding and self-contained, not backed by a conventional loader/libc,
+
+Forth wants exact stack discipline and control over calling conventions,
+
+your machine has only a few general-purpose registers,
+
+C function calling and Forth threading may fight each other,
+
+if you do it in C first, you may accidentally implement a C-hosted interpreter instead of a faithful target Forth.
+
+Approach C: Meta-compiler / cross-compiler from another Forth
+Another classic method is to use an existing Forth on a host machine to generate a target image. This is elegant and historically important, but it adds conceptual complexity early.
+
+I would delay this.
+It becomes attractive after you have:
+
+one working target kernel,
+
+a clear target image format,
+
+confidence in dictionary layout.
+
+Approach D: Subroutine-threaded Forth using native CALL/RET
+Instead of classic indirect threading, each colon definition compiles machine calls to primitives/words.
+
+Pros
+
+simpler model on some CPUs,
+
+better interoperability with native code,
+
+easier debugging in some cases.
+
+Cons
+
+can be less faithful to the classic “threaded interpretive” model you specifically want to learn from,
+
+depends heavily on COR24 call/return cost and return-stack behavior.
+
+For learning, I would start with indirect-threaded or direct-threaded style, then later experiment with subroutine threading.
+
+Which threading model to start with?
+The main historical families are:
+
+Indirect-threaded code (ITC)
+Parameter fields hold pointers to code fields; the inner interpreter dereferences more than once.
+
+Direct-threaded code (DTC)
+Compiled code points more directly at executable fragments.
+
+Subroutine-threaded code (STC)
+Definitions are machine call sequences.
+
+Token-threaded code
+Compact tokens index into a dispatch table.
+
+For a first faithful system, I would choose:
+
+Start with indirect-threaded or direct-threaded
+Why:
+
+aligns closely with the classic literature on threaded interpretive languages, 
+
+makes the dictionary structure obvious,
+
+keeps colon definitions compact,
+
+makes DOCOL, EXIT, LIT, and defining words conceptually clean.
+
+My bias for your target
+Because COR24 has only 3 GP registers, you may want to test both:
+
+ITC if simplicity of implementation matters most,
+
+DTC if you can shave a dereference and make NEXT cheaper.
+
+This is one of the few places where benchmarking on your emulator is worth doing very early.
+
+Bootstrapping plan I would use
+Phase 0 — Decide the target model
+Before coding, freeze these design decisions:
+
+cell size: likely one machine word on COR24,
+
+endianness,
+
+alignment rules,
+
+dictionary header layout,
+
+threaded model: ITC or DTC,
+
+separate return stack: yes,
+
+input source: UART / terminal,
+
+numeric formats: start with decimal only, maybe hex later.
+
+Write this down first. Forth implementations become much easier once the dictionary and execution token model are fixed.
+
+Phase 1 — Write the micro-kernel in assembler
+Implement only these machine-level pieces:
+
+Core runtime
+reset/startup
+
+memory map initialization
+
+stack pointers
+
+terminal I/O
+
+panic / error output
+
+Inner interpreter primitives
+NEXT
+
+DOCOL
+
+EXIT
+
+LIT
+
+branch primitive
+
+zero-branch primitive
+
+Stack primitives
+At minimum:
+
+DROP
+
+DUP
+
+SWAP
+
+OVER
+
+ROT can wait
+
+>R
+
+R>
+
+R@
+
+Arithmetic / logic
+At minimum:
+
++
+
+-
+
+AND
+
+OR
+
+XOR
+
+=
+
+<
+
+0=
+
+maybe UM* later
+
+Memory access
+At minimum:
+
+@
+
+!
+
+C@
+
+C!
+
+,
+
+C,
+
+Dictionary/compiler support
+At minimum:
+
+CREATE or at least the machinery behind it
+
+:
+
+;
+
+,
+
+ALLOT
+
+HERE
+
+LATEST or equivalent internal variable
+
+FIND
+
+number parser
+
+EXECUTE
+
+Terminal / parsing
+At minimum:
+
+KEY
+
+EMIT
+
+token parser
+
+WORD-like mechanism or simpler equivalent
+
+This is enough to get to a very small self-hosting core.
+
+Phase 2 — Bring up the text interpreter
+Your first interactive milestone should be:
+
+type 1 2 + .
+
+define : SQUARE DUP * ;
+
+run 5 SQUARE .
+
+You are not “done” when primitives run. You are “done” when the system can:
+
+interpret tokens,
+
+compile new words,
+
+execute compiled definitions.
+
+That is the moment the bootstrap flips from “assembler project” to “Forth project.”
+
+Phase 3 — Move higher-level words into Forth source
+Once : and ; work, stop adding convenience features in assembler unless they are truly primitive or performance-critical.
+
+Now define in Forth:
+
+stack convenience words,
+
+arithmetic combinations,
+
+conditionals,
+
+loops,
+
+comments,
+
+variables/constants,
+
+simple tools,
+
+decompiler/introspection later.
+
+This is where the real educational value is.
+
+Phase 4 — Add defining words and control structures
+Classic Forth grows rapidly once you have:
+
+CREATE
+
+DOES>
+
+VARIABLE
+
+CONSTANT
+
+IMMEDIATE
+
+[ ]
+
+IF ELSE THEN
+
+BEGIN UNTIL AGAIN WHILE REPEAT
+
+DO LOOP later, if you want ANS-style loop indices
+
+These are usually not all primitive. Many are compiled with branch patching and immediate words.
+
+Phase 5 — Decide how standard you want to be
+At this point choose one of two goals:
+
+Goal A: Faithful historical Forth
+compact,
+
+minimal,
+
+close to FIG-Forth / early model,
+
+easier to understand and port,
+
+fewer portability guarantees.
+
+Goal B: ANS/ISO-ish Forth
+larger surface area,
+
+clearer conformance target,
+
+easier to compare against documentation and test suites,
+
+more work.
+
+For teaching, I would do A first, then B selectively.
+
+Should you start with C?
+My answer: use C only as a helper, not as the kernel foundation
+Because you said:
+
+no full C runtime,
+
+no loader/linker,
+
+.h and .c support is all local,
+
+memory is explicitly partitioned,
+
+you can emit inline assembler,
+
+interrupts are special.
+
+That makes C useful for:
+
+host-side experiments,
+
+generating tables,
+
+testing parsers,
+
+maybe prototyping the tokenizer or number parser,
+
+maybe a reference implementation of dictionary algorithms.
+
+But I would not make the Forth nucleus depend on malloc/free/printf/stdio unless you are creating a temporary host simulator version.
+
+Why not rely on malloc/free
+A real Forth usually does not want heap allocation in the C sense for its core dictionary model. It typically manages:
+
+dictionary space,
+
+stacks,
+
+buffers,
+
+user area
+explicitly.
+
+Why not rely on printf
+It gives you convenience early, but it delays the work of creating actual Forth I/O words and formatting.
+
+Best compromise
+Make two builds if useful:
+
+hosted reference build in C, for experimenting,
+
+target-native assembler build for the real system.
+
+But treat the hosted build as scaffolding, not the product.
+
+Clean-room vs porting an existing implementation
+Best practical answer: read widely, borrow ideas, but implement your own kernel cleanly
+That gives you the best combination of:
+
+educational value,
+
+license safety,
+
+architectural fit for COR24,
+
+historical faithfulness.
+
+Why a direct port is less attractive
+Most existing Forths assume:
+
+a conventional assembler,
+
+a host OS,
+
+richer calling conventions,
+
+file I/O,
+
+more mature loader/linker support,
+
+different memory assumptions.
+
+Porting can become harder than re-implementing a minimal kernel.
+
+When porting is worth it
+Port if you find a system that is:
+
+tiny,
+
+well documented,
+
+architecturally similar,
+
+under a permissive or public-domain-equivalent license,
+
+structurally close to what you want.
+
+For learning, JonesForth is excellent because it is a small, literate educational implementation and is released to the public domain. 
+
+For portability ideas, pForth is valuable because it is a portable ANS Forth in C and is described as public domain; Debian also lists it under BSD-0 in packaging metadata. 
+
+Historically, FIG-Forth and eForth are also strongly associated with public-domain-style distribution and portability-minded dissemination. 
+
+My recommendation
+Do a clean-room implementation of the kernel and dictionary layout.
+
+Use existing systems as references for ideas, sequencing, and tests, not as code donors.
+
+If you later copy code, do it only from a clearly compatible permissive/public-domain source and preserve notices.
+
+License guidance
+Important distinction: there is no single “license for Forth”
+Forth is a language family and standard, not one codebase. Implementations vary widely in license.
+
+Examples:
+
+Gforth is GPL. 
+
+JonesForth is public domain. 
+
+pForth is described as public domain / public-domain-equivalent. 
+
+historical FIG-Forth and related public distributions were widely circulated as public-domain style listings. 
+
+So what should you do?
+If your goal is maximum freedom and lowest legal friction:
+Use either:
+
+clean-room original implementation under MIT / BSD-2-Clause / BSD-0 / ISC, or
+
+borrow only from public domain / BSD-0 / MIT / BSD sources.
+
+Avoid for your purpose:
+GPL-licensed implementation code as a porting base, unless you are comfortable releasing your result accordingly.
+
+My strong recommendation
+For your project, choose one of these:
+
+MIT if you want conventional permissive licensing,
+
+BSD-2-Clause if you prefer classic minimal permissive licensing,
+
+BSD-0 / 0BSD if you want near-public-domain simplicity,
+
+or your own clean-room implementation plus a permissive license.
+
+That keeps the project reusable for hobby, educational, embedded, and commercial scenarios.
+
+Is there good public documentation on implementing Forth?
+Yes. The most useful public documentation sources for your purpose are:
+
+1. Forth 2012 standard / standard site
+This tells you how the standardized word sets are organized and what the required vs optional sets are. The standard says the Core word set is the only required word set; other word sets are optional additions. 
+
+2. Threaded interpretive language literature
+This explains the execution model and why Forth bootstraps so effectively. 
+
+3. Small literate implementations
+JonesForth is especially useful for understanding:
+
+dictionary layout,
+
+code fields,
+
+colon definitions,
+
+immediate words,
+
+the transition from primitives to self-extension. 
+
+What is the terminology for the base set and add-on sets?
+In standardized Forth terminology, the big organizing concept is the word set.
+
+The standard distinguishes:
+
+Core word set — the essential required set,
+
+Core Extension word set — common extensions,
+
+plus other optional word sets such as:
+
+Double-Number,
+
+Exception,
+
+Facility,
+
+File-Access,
+
+Floating-Point,
+
+Locals,
+
+Memory-Allocation,
+
+Programming-Tools,
+
+Search-Order,
+
+String,
+
+Block,
+and corresponding extension sets. The standard site and rationale explicitly describe the Core set as the only required set and the others as optional. 
+
+For an embedded COR24 system, you probably want to think in these layers:
+
+kernel / nucleus — your machine-level primitives and interpreter core,
+
+core words — enough to program and extend the language,
+
+extensions / optional word sets — files, tools, locals, exceptions, etc.,
+
+target-specific words — memory-mapped I/O, interrupts, board support.
+
+Which words are minimal?
+There are two answers.
+
+1. Minimal practical kernel for bootstrapping
+This is smaller than the standardized Core set.
+
+You need enough to support:
+
+Execution model
+EXIT
+
+LIT
+
+branch and conditional branch
+
+EXECUTE
+
+Stack
+DROP
+
+DUP
+
+SWAP
+
+OVER
+
+>R
+
+R>
+
+R@
+
+Arithmetic / compare
++
+
+-
+
+=
+
+0=
+
+<
+
+maybe AND OR XOR
+
+Memory
+@
+
+!
+
+C@
+
+C!
+
+,
+
+C,
+
+HERE
+
+ALLOT
+
+Dictionary / compiler
+FIND
+
+number conversion
+
+:
+
+;
+
+IMMEDIATE
+
+[
+
+]
+
+Terminal
+KEY
+
+EMIT
+
+token parsing
+
+That is enough to get a living language.
+
+2. Minimal standard-conforming base
+If you aim at standard terminology, the relevant anchor is the Core word set from Forth 2012. 
+
+But I would not try to implement the full standard Core up front.
+First implement a bootstrap nucleus, then grow toward a useful subset of Core.
+
+How are more features added?
+Forths usually grow in concentric rings:
+
+Ring 1 — primitives in machine code
+Only what cannot be conveniently or efficiently expressed yet.
+
+Ring 2 — compiler and interpreter support
+parser
+
+dictionary search
+
+: / ;
+
+immediate behavior
+
+Ring 3 — defining and control words
+VARIABLE
+
+CONSTANT
+
+CREATE
+
+DOES>
+
+IF THEN ELSE
+
+loops
+
+Ring 4 — tooling
+.S
+
+WORDS
+
+SEE
+
+decompiler
+
+tests
+
+Ring 5 — target integration
+PORT@, PORT!
+
+interrupt vectors
+
+timers
+
+GPIO/UART/I2C board words
+
+Ring 6 — optional standard word sets
+Only if wanted:
+
+exception handling,
+
+locals,
+
+blocks or files,
+
+search-order,
+
+memory-allocation,
+
+programming tools.
+
+Low-level design advice specific to COR24
+Given:
+
+3 GP registers,
+
+FP and SP,
+
+memory-mapped I/O,
+
+assembler and emulator available,
+
+ability to inject inline assembly from C,
+
+I would design for:
+
+Separate Forth stacks
+Do not try to map Forth semantics onto C stack frames.
+Keep a true:
+
+data stack,
+
+return stack.
+
+Register allocation sketch
+Something like:
+
+one register = interpreter pointer / thread pointer,
+
+one register = top-of-stack cache,
+
+one register = scratch / work.
+
+A top-of-stack cache can matter a lot on a small-register ISA.
+
+Dictionary layout
+Use a simple classic header:
+
+link field
+
+flags/length
+
+name bytes
+
+aligned code field
+
+parameter field
+
+Do not overcomplicate the first version with hashed headers or fancy search order.
+
+I/O words
+Expose memory-mapped I/O as words early:
+
+IO@
+
+IO!
+
+bit-set/bit-clear helpers later.
+
+Interrupts
+Treat interrupt handling as a separate subsystem, not part of the bootstrap kernel proper.
+First get a stable interactive Forth.
+Then add:
+
+vector installation,
+
+ISR trampolines,
+
+shared buffers,
+
+deferred words/hooks if desired.
+
+Pros and cons of the main options
+Option 1: Clean-room assembler kernel, grow in Forth
+Pros
+
+most faithful,
+
+best educational value,
+
+least dependency on weak C runtime assumptions,
+
+best control over hardware.
+
+Cons
+
+slower start,
+
+requires careful debugging.
+
+Option 2: Portable C Forth first, later retarget
+Pros
+
+faster initial iteration,
+
+easier host-side testing.
+
+Cons
+
+risks building the wrong thing,
+
+less faithful,
+
+awkward fit for bare metal.
+
+Option 3: Port a permissive tiny Forth
+Pros
+
+faster bootstrap,
+
+can inherit proven ideas.
+
+Cons
+
+architectural mismatch,
+
+license hygiene still required,
+
+may teach less than building the nucleus yourself.
+
+My recommended path for you
+Best path
+Study:
+
+Forth 2012 word-set organization,
+
+JonesForth structure,
+
+threaded-language execution model. 
+
+Write a clean-room COR24 Forth nucleus in assembler:
+
+stacks,
+
+dictionary,
+
+NEXT,
+
+primitives,
+
+: and ;,
+
+terminal input.
+
+Define everything else in Forth as early as possible.
+
+License your implementation permissively:
+
+MIT, BSD-2-Clause, or 0BSD are all good fits.
+MIT and BSD are standard permissive open-source licenses. 
+
+Use existing permissive/public-domain Forths as references, not as a porting obligation:
+
+JonesForth,
+
+pForth,
+
+FIG/eForth history. 
+
+Concrete milestone plan
+Milestone 1 — minimal monitor
+UART console
+
+memory dump / write
+
+reset and exception print
+
+Milestone 2 — stacks and primitives
+data stack and return stack
+
+DUP DROP SWAP OVER
+
+@ ! + - = 0=
+
+Milestone 3 — threaded executor
+dictionary entries
+
+EXECUTE
+
+DOCOL
+
+EXIT
+
+LIT
+
+Milestone 4 — interpreter/compiler
+tokenizer
+
+FIND
+
+number parser
+
+interpret/compile state
+
+: and ;
+
+Milestone 5 — first self-hosted growth
+In Forth source, define:
+
+.
+
+CR
+
+SPACE
+
+VARIABLE
+
+CONSTANT
+
+IF ELSE THEN
+
+BEGIN UNTIL
+
+Milestone 6 — developer usability
+WORDS
+
+.S
+
+error messages
+
+simple tests
+
+Milestone 7 — board integration
+memory-mapped I/O words
+
+interrupt support
+
+device-specific vocabulary
+
+Final judgment
+For your exact situation, I would choose:
+
+Clean-room bootstrap with assembler nucleus + permissive license
+That is the most faithful, the least encumbered, and the best way to actually learn Forth by teaching it to the machine.
+
+A permissive-source port can still be useful as a reference text, but I would not make your real COR24 implementation a straight port unless you discover a tiny implementation whose structure nearly matches your target.
+
+If you want, I can turn this into a detailed staged bootstrap document with:
+
+required primitive words,
+
+suggested dictionary header layout,
+
+a recommended ITC vs DTC design for COR24,
+
+and a “first 30 words” bring-up sequence.
+
+
+
+
