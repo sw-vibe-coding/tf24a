@@ -1020,16 +1020,14 @@ do_word:
     lbu r0, 0(r0)
     ceq r0, z
     brt word_no_eol
-    ; Clear flag and return empty
+    ; Clear flag and return empty counted string (length=0)
     la r0, word_eol_flag
     lc r2, 0
     sb r2, 0(r0)
     la r0, word_buffer
-    lc r2, 0
-    sb r2, 0(r0)
-    add r1, 3           ; pop IP wait... we haven't pushed buf_ptr yet
-    ; RS: [IP]. Push word_buffer, restore IP, NEXT
-    push r0
+    sb r2, 0(r0)        ; word_buffer[0] = 0 (length)
+    push r0              ; push word_buffer address onto DS
+    ; Restore IP from RS and NEXT (normal WORD return path)
     lw r2, 0(r1)
     add r1, 3
     lw r0, 0(r2)

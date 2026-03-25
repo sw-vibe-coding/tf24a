@@ -117,6 +117,19 @@ cor24-run --run forth.s -u 'inputs\n' --speed 0 -n 5000000 2>&1 | grep "^UART ou
 
 When adding threaded-code tests, add them to test_thread BEFORE the `do_quit` entry.
 
+**Run the full test suite with:** `./demo.sh test`
+
+**Stack leak tests are mandatory.** Every new word must be tested for stack balance:
+```bash
+# Before and after calling NEWWORD, DEPTH must not change
+cor24-run --run forth.s -u 'DEPTH .\nNEWWORD\nDEPTH .\n' --speed 0 -n 10000000
+```
+
+**Common COR24 stack bugs:**
+- Using `push r2` (DS) instead of `sw r2, 0(r1); add r1, -3` (RS) to save IP
+- WORD's eol_flag path must pop exactly one RS entry (saved IP), not more
+- Any `push`/`pop` inside a primitive changes sp — account for this in DEPTH/.S
+
 ### DTC Inner Interpreter
 ```
 ; NEXT (inline everywhere or as tail of each primitive):
