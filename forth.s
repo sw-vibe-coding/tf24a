@@ -38,7 +38,7 @@ _start:
     la r1, 983040       ; r1 = 0x0F0000 return stack base
 
     ; Initialize system variables (r0, r2 free before Phase 1)
-    la r2, entry_words
+    la r2, entry_bye
     la r0, var_latest_val
     sw r2, 0(r0)        ; LATEST = last dictionary entry
     la r2, dict_end
@@ -2386,6 +2386,16 @@ words_next:
     lw r0, 0(r0)        ; follow link
     la r2, words_loop
     jmp (r2)
+
+; ------------------------------------------------------------
+; BYE ( -- ) : Halt the CPU
+; ------------------------------------------------------------
+entry_bye:
+    .word entry_words
+    .byte 3
+    .byte 66, 89, 69        ; "BYE"
+do_bye:
+    bra do_bye
 
 ; ============================================================
 ; System Variable Storage

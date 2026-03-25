@@ -79,7 +79,31 @@ case "${1:-demo}" in
     echo "--- Stack stability ---"
     check ".S repeated"     '1 2 3 .S\n.S\n.S\nDEPTH .\n'  '<3> 1 2 3 ok <3> 1 2 3 ok <3> 1 2 3 ok 3 ok'
     check "no REPL leak"    'DEPTH .\nDEPTH .\nDEPTH .\n'   '0 ok 0 ok 0 ok'
-    check "no WORDS leak"   'DEPTH .\nWORDS\nDEPTH .\n'     '0 ok WORDS .S DEPTH HEX DECIMAL SPACE CR QUIT INTERPRET NUMBER . LED! IMMEDIATE ; : CREATE WORD FIND ] [ ALLOT C, , BASE STATE LATEST HERE EXECUTE C! C@ ! @ R@ R> >R OVER SWAP DUP DROP 0= < = XOR OR AND - + EXIT KEY EMIT ok 0 ok'
+    check "no WORDS leak"   'WORDS\nDEPTH .\n'     'BYE WORDS .S DEPTH HEX DECIMAL SPACE CR QUIT INTERPRET NUMBER . LED! IMMEDIATE ; : CREATE WORD FIND ] [ ALLOT C, , BASE STATE LATEST HERE EXECUTE C! C@ ! @ R@ R> >R OVER SWAP DUP DROP 0= < = XOR OR AND - + EXIT KEY EMIT ok 0 ok'
+
+    echo "--- Per-word stack balance ---"
+    check "CR no leak"       'DEPTH .\nCR\nDEPTH .\n'       '0 ok ok 0 ok'
+    check "SPACE no leak"    'DEPTH .\nSPACE\nDEPTH .\n'    '0 ok ok 0 ok'
+    check "EMIT no leak"     '65 EMIT\nDEPTH .\n'           'A ok 0 ok'
+    echo "  SKIP: KEY (needs interactive input)"
+    check "+ balance"        '1 2 + DEPTH .\n'               '1 ok'
+    check "- balance"        '5 3 - DEPTH .\n'               '1 ok'
+    check "AND balance"      '7 3 AND DEPTH .\n'             '1 ok'
+    check "OR balance"       '5 3 OR DEPTH .\n'              '1 ok'
+    check "XOR balance"      '5 3 XOR DEPTH .\n'             '1 ok'
+    check "= true"           '3 3 = .\n'                     '-1 ok'
+    check "= false"          '3 4 = .\n'                     '0 ok'
+    check "< true"           '2 5 < .\n'                     '-1 ok'
+    check "< false"          '5 2 < .\n'                     '0 ok'
+    check "0= true"          '0 0= .\n'                      '-1 ok'
+    check "0= false"         '7 0= .\n'                      '0 ok'
+    check ">R R>"            '99 >R R> .\n'                   '99 ok'
+    check "R@"               '99 >R R@ . R> DROP\n'          '99 ok'
+    check "@ !"              'HERE @ HERE @ = .\n'           '-1 ok'
+    check "C@ C!"            'HERE @ 99 OVER C! C@ .\n'     '99 ok'
+    check "LED! no leak"     '1 LED!\nDEPTH .\n'            'ok 0 ok'
+    check "NUMBER no leak"   '42\nDEPTH .\n'                'ok 1 ok'
+    echo "  SKIP: BYE (halts CPU)"
 
     echo "--- Error handling ---"
     check "unknown word"  'FOO\n'  '? ok'
