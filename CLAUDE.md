@@ -64,12 +64,58 @@ Clean-room DTC Forth for the COR24 24-bit RISC ISA. Assembler kernel, self-exten
 - sp = DSP (data stack, hardware push/pop in EBR)
 - fp = available as extra scratch
 
-### Key ISA Constraints
-- Only r0, r1, r2, sp support `add rX, imm8`; fp does NOT
-- push/pop only work with sp (1-byte instructions)
-- Branch offset ±127 bytes (signed 8-bit)
-- `jal r1,(r0)` sets r1=PC+1, jumps to r0 — conflicts with r1=RSP
+### COR24 ISA — Register Capabilities (MUST follow)
+
+**Load destinations:** only r0, r1, r2 (NOT fp, sp)
+- `lc r0, imm8` / `lcu r0, imm8` / `la r0, imm24` — ✓ for r0, r1, r2
+- `lw r0, off(base)` / `lb`, `lbu` — destination must be r0, r1, or r2
+- `lc fp, ...` / `lw fp, ...` — **ILLEGAL**, will not assemble
+
+**ALU destinations:** only r0, r1, r2
+- `add r0, r2` / `sub r0, r2` / `and`, `or`, `xor` — ✓ for r0, r1, r2
+- `add fp, ...` / `sub fp, ...` — **ILLEGAL**
+- `add r0, imm8` — works for r0, r1, r2, sp (NOT fp)
+
+**Comparisons:** `ceq ra, rb`, `clu ra, rb`, `cls ra, rb`
+- ra and rb can be r0, r1, r2, fp, sp, z
+- Use `ceq r0, z` to test zero
+
+**Stack:** `push ra` / `pop ra` — ra can be r0, r1, r2, fp
+- `push fp` and `pop fp` work (this is how to move fp ↔ r0)
+
+**fp as base register:** `lw r0, off(fp)` / `sw r0, off(fp)` — ✓
+- fp is the ONLY way to index into EBR stack memory
+
+**Reading sp:** `mov fp, sp` copies sp to fp. Then `push fp; pop r0` gets the value into r0.
+- There is NO `mov r0, sp` instruction
+- `mov sp, fp` restores sp from fp
+
+**Key constraints:**
+- Branch offset ±127 bytes (signed 8-bit); use `la r0, label; jmp (r0)` for far jumps
+- `jal r1,(r0)` conflicts with r1=RSP — do not use for subroutine calls
 - Cell size = 3 bytes (24-bit words)
+- sp inits at 0xFEEC00, grows down
+
+See `docs/inspect-stack-impl.md` for full ISA reference.
+
+### Development Rules — TDD Required
+
+**Every new word or feature MUST have a test before implementation.**
+
+1. Write the test first as a threaded-code sequence in the test_thread, or as a `cor24-run -u` command
+2. Verify the test fails or produces wrong output
+3. Implement the word
+4. Verify the test passes
+5. Run ALL previous tests to check for regressions
+
+Test format for `cor24-run -u`:
+```bash
+# Test: WORD ( inputs -- expected-outputs )
+cor24-run --run forth.s -u 'inputs\n' --speed 0 -n 5000000 2>&1 | grep "^UART output:"
+# Expected: ... expected output ...
+```
+
+When adding threaded-code tests, add them to test_thread BEFORE the `do_quit` entry.
 
 ### DTC Inner Interpreter
 ```
